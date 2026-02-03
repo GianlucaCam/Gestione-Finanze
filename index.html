@@ -614,6 +614,66 @@
             border-color: #667eea;
             background: #f0f4ff;
         }
+
+        .calculator-display {
+            background: #f8f9fa;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            padding: 20px;
+            font-size: 32px;
+            font-weight: bold;
+            text-align: right;
+            color: #333;
+            margin-bottom: 15px;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+        }
+
+        .calculator-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .calc-btn {
+            padding: 20px;
+            font-size: 20px;
+            font-weight: 600;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .calc-btn:hover {
+            background: #f0f4ff;
+            border-color: #667eea;
+            transform: scale(1.05);
+        }
+
+        .calc-btn:active {
+            transform: scale(0.95);
+        }
+
+        .calc-btn-operator {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: #667eea;
+        }
+
+        .calc-btn-clear {
+            background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+            color: #333;
+        }
+
+        .calc-btn-equals {
+            background: linear-gradient(135deg, #d4fc79 0%, #96e6a1 100%);
+            color: #333;
+        }
     </style>
 </head>
 <body>
@@ -716,14 +776,18 @@
             <div id="categories" class="section">
                 <h2 style="margin-bottom: 20px; color: #333;">Gestisci Categorie</h2>
                 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 30px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 30px;">
                     <button class="add-category-btn" onclick="openAddCategoryModal()" style="min-height: auto;">
                         <span style="font-size: 24px;">+</span>
-                        <span>Aggiungi Nuova Categoria</span>
+                        <span>Aggiungi Categoria</span>
+                    </button>
+                    <button class="add-category-btn" onclick="exportData()" style="min-height: auto; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                        <span style="font-size: 24px;">📤</span>
+                        <span>Esporta Dati</span>
                     </button>
                     <button class="add-category-btn" onclick="openImportModal()" style="min-height: auto; background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);">
                         <span style="font-size: 24px;">📥</span>
-                        <span>Importa Dati da 1Money</span>
+                        <span>Importa Dati</span>
                     </button>
                 </div>
 
@@ -749,7 +813,30 @@
                 
                 <div class="form-group">
                     <label>Importo (€)</label>
-                    <input type="number" id="amount" step="0.01" placeholder="0.00" required autofocus>
+                    <div class="calculator-display" id="calculatorDisplay">0</div>
+                    <input type="hidden" id="amount" required>
+                    
+                    <div class="calculator-grid">
+                        <button type="button" class="calc-btn" onclick="addToCalculator('7')">7</button>
+                        <button type="button" class="calc-btn" onclick="addToCalculator('8')">8</button>
+                        <button type="button" class="calc-btn" onclick="addToCalculator('9')">9</button>
+                        <button type="button" class="calc-btn calc-btn-operator" onclick="addToCalculator('+')">+</button>
+                        
+                        <button type="button" class="calc-btn" onclick="addToCalculator('4')">4</button>
+                        <button type="button" class="calc-btn" onclick="addToCalculator('5')">5</button>
+                        <button type="button" class="calc-btn" onclick="addToCalculator('6')">6</button>
+                        <button type="button" class="calc-btn calc-btn-operator" onclick="addToCalculator('-')">−</button>
+                        
+                        <button type="button" class="calc-btn" onclick="addToCalculator('1')">1</button>
+                        <button type="button" class="calc-btn" onclick="addToCalculator('2')">2</button>
+                        <button type="button" class="calc-btn" onclick="addToCalculator('3')">3</button>
+                        <button type="button" class="calc-btn calc-btn-operator" onclick="addToCalculator('*')">×</button>
+                        
+                        <button type="button" class="calc-btn" onclick="addToCalculator('0')">0</button>
+                        <button type="button" class="calc-btn" onclick="addToCalculator('.')">.</button>
+                        <button type="button" class="calc-btn calc-btn-clear" onclick="clearCalculator()">C</button>
+                        <button type="button" class="calc-btn calc-btn-equals" onclick="calculateResult()">=</button>
+                    </div>
                 </div>
 
                 <div class="form-group">
@@ -1026,6 +1113,42 @@
         // ===== GESTIONE CATEGORIE =====
         let importData = null;
 
+        function exportData() {
+            // Crea l'oggetto con tutti i dati
+            const dataToExport = {
+                accounts: accounts,
+                categories: categories,
+                transactions: transactions,
+                exportDate: new Date().toISOString(),
+                version: '1.0'
+            };
+
+            // Converti in JSON
+            const jsonString = JSON.stringify(dataToExport, null, 2);
+            
+            // Crea un blob
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            
+            // Crea un link per il download
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            
+            // Nome file con data
+            const today = new Date().toISOString().split('T')[0];
+            link.download = `finanze_backup_${today}.json`;
+            
+            // Simula il click
+            document.body.appendChild(link);
+            link.click();
+            
+            // Pulizia
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            
+            alert(`✅ Dati esportati con successo!\n\nConti: ${accounts.length}\nCategorie: ${categories.length}\nTransazioni: ${transactions.length}\n\nFile salvato: finanze_backup_${today}.json`);
+        }
+
         function selectEmoji(emoji) {
             document.getElementById('categoryIcon').value = emoji;
             
@@ -1086,20 +1209,60 @@
                 return;
             }
 
-            if (!confirm('Sei sicuro? Tutti i dati attuali verranno sostituiti con quelli importati!')) {
+            const numTransactions = importData.transactions?.length || 0;
+            const numAccounts = importData.accounts?.length || 0;
+            const numCategories = importData.categories?.length || 0;
+
+            console.log('Dati da importare:', importData);
+            console.log('Accounts:', importData.accounts);
+            console.log('Categories:', importData.categories);
+            console.log('Transactions:', numTransactions);
+
+            // LIMITE: il localStorage ha un massimo di circa 5-10MB
+            // Con 607K transazioni supereremmo il limite
+            const MAX_TRANSACTIONS = 50000;
+            let transactionsToImport = importData.transactions || [];
+            let limitWarning = '';
+
+            if (numTransactions > MAX_TRANSACTIONS) {
+                limitWarning = `\n\n⚠️ ATTENZIONE: Il file contiene ${numTransactions.toLocaleString()} transazioni.\nPer limitazioni del browser, verranno importate solo le ultime ${MAX_TRANSACTIONS.toLocaleString()} transazioni.\n\nSe vuoi tutte le transazioni, considera di creare più backup separati per periodo.`;
+                
+                // Prendi solo le ultime transazioni (ordinate per data)
+                transactionsToImport = transactionsToImport
+                    .sort((a, b) => new Date(b.date) - new Date(a.date))
+                    .slice(0, MAX_TRANSACTIONS);
+            }
+
+            if (!confirm(`Confermi l'importazione?\n\n- ${numAccounts} conti\n- ${numCategories} categorie\n- ${transactionsToImport.length.toLocaleString()} transazioni${limitWarning}\n\n⚠️ I dati attuali verranno sostituiti!`)) {
                 return;
             }
 
-            // Importa i dati
-            accounts = importData.accounts || [];
-            categories = importData.categories || [];
-            transactions = importData.transactions || [];
+            try {
+                console.log('Inizio importazione...');
+                
+                // Importa i dati
+                accounts = importData.accounts || [];
+                categories = importData.categories || [];
+                transactions = transactionsToImport;
 
-            saveData();
-            closeModal('importModal');
-            updateAll();
+                console.log('Dati assegnati:', {accounts: accounts.length, categories: categories.length, transactions: transactions.length});
 
-            alert(`✅ Importazione completata!\n\nConti: ${accounts.length}\nCategorie: ${categories.length}\nTransazioni: ${transactions.length}`);
+                console.log('Salvataggio in localStorage...');
+                saveData();
+                console.log('Dati salvati in localStorage');
+                
+                closeModal('importModal');
+                
+                console.log('Aggiornamento interfaccia...');
+                updateAll();
+
+                console.log('Importazione completata!');
+
+                alert(`✅ Importazione completata con successo!\n\nConti: ${accounts.length}\nCategorie: ${categories.length}\nTransazioni: ${transactions.length.toLocaleString()}`);
+            } catch (error) {
+                console.error('Errore durante importazione:', error);
+                alert(`❌ Errore durante l'importazione:\n\n${error.message}\n\nProva a importare meno transazioni o contatta il supporto.`);
+            }
         }
 
         function openAddCategoryModal(type = null) {
@@ -1187,10 +1350,43 @@
         }
 
         // ===== GESTIONE TRANSAZIONI =====
+        let calculatorValue = '';
+
+        function addToCalculator(value) {
+            calculatorValue += value;
+            document.getElementById('calculatorDisplay').textContent = calculatorValue || '0';
+        }
+
+        function clearCalculator() {
+            calculatorValue = '';
+            document.getElementById('calculatorDisplay').textContent = '0';
+            document.getElementById('amount').value = '';
+        }
+
+        function calculateResult() {
+            try {
+                // Valuta l'espressione matematica
+                const result = eval(calculatorValue.replace('×', '*').replace('−', '-'));
+                const finalValue = parseFloat(result).toFixed(2);
+                
+                calculatorValue = finalValue;
+                document.getElementById('calculatorDisplay').textContent = finalValue;
+                document.getElementById('amount').value = finalValue;
+            } catch (error) {
+                document.getElementById('calculatorDisplay').textContent = 'Errore';
+                setTimeout(() => {
+                    clearCalculator();
+                }, 1000);
+            }
+        }
+
         function openTransactionDrawer(categoryId, categoryName, type) {
             // Reset form PRIMA
             document.getElementById('transactionForm').reset();
             document.getElementById('date').valueAsDate = new Date();
+            
+            // Reset calcolatrice
+            clearCalculator();
             
             // POI imposto i valori (altrimenti il reset li cancella!)
             document.getElementById('transactionType').value = type;
@@ -1200,18 +1396,29 @@
             // Aggiorna select conti
             updateAccountSelect();
             
-            openModal('transactionModal');
+            // Pre-seleziona il conto predefinito
+            const defaultAccountId = getDefaultAccount();
+            if (defaultAccountId) {
+                document.getElementById('account').value = defaultAccountId;
+            }
             
-            // Focus sull'importo
-            setTimeout(() => document.getElementById('amount').focus(), 100);
+            openModal('transactionModal');
         }
 
         function addTransaction(e) {
             e.preventDefault();
             
+            // Assicurati che ci sia un importo valido
+            const amountValue = document.getElementById('amount').value || calculatorValue;
+            
+            if (!amountValue || parseFloat(amountValue) <= 0) {
+                alert('Inserisci un importo valido!');
+                return;
+            }
+            
             const categoryId = parseInt(document.getElementById('transactionCategory').value);
             const type = document.getElementById('transactionType').value;
-            const amount = parseFloat(document.getElementById('amount').value);
+            const amount = parseFloat(amountValue);
             
             // Debug temporaneo
             console.log('Salvando transazione:', {
@@ -1265,7 +1472,8 @@
             const account = {
                 id: Date.now(),
                 name: document.getElementById('accountName').value,
-                initialBalance: parseFloat(document.getElementById('initialBalance').value)
+                initialBalance: parseFloat(document.getElementById('initialBalance').value),
+                isDefault: false
             };
             
             accounts.push(account);
@@ -1655,18 +1863,45 @@
             
             container.innerHTML = accounts.map(account => {
                 const balance = getAccountBalance(account.id);
+                const isDefault = account.isDefault ? '⭐' : '';
                 return `
-                    <div class="account-card">
+                    <div class="account-card" style="${account.isDefault ? 'border: 2px solid #667eea;' : ''}">
                         <div class="account-info">
-                            <h3>${account.name}</h3>
+                            <h3>${isDefault} ${account.name}</h3>
                             <div class="account-balance">${formatCurrency(balance)}</div>
+                            ${account.isDefault ? '<small style="color: #667eea;">Conto predefinito</small>' : ''}
                         </div>
-                        <button class="btn-icon btn-danger" onclick="deleteAccount(${account.id})" title="Elimina conto">
-                            ×
-                        </button>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            ${!account.isDefault ? `
+                                <button class="btn-icon" onclick="setDefaultAccount(${account.id})" title="Imposta come predefinito" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                                    ⭐
+                                </button>
+                            ` : ''}
+                            <button class="btn-icon btn-danger" onclick="deleteAccount(${account.id})" title="Elimina conto">
+                                ×
+                            </button>
+                        </div>
                     </div>
                 `;
             }).join('');
+        }
+
+        function setDefaultAccount(accountId) {
+            // Rimuovi il flag da tutti gli altri conti
+            accounts.forEach(acc => acc.isDefault = false);
+            
+            // Imposta il nuovo conto predefinito
+            const account = accounts.find(a => a.id === accountId);
+            if (account) {
+                account.isDefault = true;
+                saveData();
+                updateAll();
+            }
+        }
+
+        function getDefaultAccount() {
+            const defaultAcc = accounts.find(a => a.isDefault);
+            return defaultAcc ? defaultAcc.id : (accounts[0] ? accounts[0].id : null);
         }
 
         function updateCategoryLists() {
