@@ -897,6 +897,22 @@
             margin-bottom: 12px;
         }
 
+        .recurring-new-buttons {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .recurring-new-buttons .add-category-btn {
+            padding: 16px;
+            font-size: 15px;
+        }
+
+        .transaction-amount.transfer {
+            color: var(--text-secondary);
+        }
+
         .recurring-card.paused {
             opacity: 0.55;
         }
@@ -933,6 +949,10 @@
         }
 
         @media (max-width: 768px) {
+            .recurring-new-buttons {
+                grid-template-columns: 1fr;
+            }
+
             .recurring-card {
                 flex-direction: column;
                 align-items: flex-start;
@@ -1074,8 +1094,23 @@
                 <h2 class="section-title">Transazioni Ricorrenti</h2>
                 <p class="muted" style="margin-bottom: 20px; font-size: 14px;">
                     Le ricorrenze vengono registrate automaticamente alla data prevista (anche quelle arretrate, all'apertura dell'app).
-                    Per crearne una, registra un'entrata o un'uscita e attiva "Ripeti".
+                    I trasferimenti ricorrenti spostano soldi tra i tuoi conti e non vengono contati come entrate o uscite.
                 </p>
+
+                <div class="recurring-new-buttons">
+                    <button class="add-category-btn" onclick="openNewRecurringModal('income')">
+                        <span style="font-size: 20px;">➕</span>
+                        <span>Entrata ricorrente</span>
+                    </button>
+                    <button class="add-category-btn" onclick="openNewRecurringModal('expense')">
+                        <span style="font-size: 20px;">➖</span>
+                        <span>Uscita ricorrente</span>
+                    </button>
+                    <button class="add-category-btn" onclick="openTransferModal(true)">
+                        <span style="font-size: 20px;">↔️</span>
+                        <span>Trasferimento ricorrente</span>
+                    </button>
+                </div>
                 <div id="recurringList"></div>
             </div>
 
@@ -1185,11 +1220,6 @@
                     <input type="date" id="date" required>
                 </div>
 
-                <div class="form-group">
-                    <label>Note (opzionale)</label>
-                    <input type="text" id="notes" placeholder="Descrizione">
-                </div>
-
                 <!-- Ricorrenza: nascosta quando si modifica un singolo movimento -->
                 <div class="form-group" id="recurringGroup">
                     <label class="checkbox-row" id="recurringToggleRow">
@@ -1210,6 +1240,11 @@
                             <input type="date" id="recurringEndDate">
                         </div>
                     </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Note (opzionale)</label>
+                    <input type="text" id="notes" placeholder="Descrizione">
                 </div>
 
                 <button type="submit" class="btn" id="transactionSubmitBtn">Registra</button>
@@ -1266,8 +1301,30 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Data</label>
+                    <label id="transferDateLabel">Data</label>
                     <input type="date" id="transferDate" required>
+                </div>
+
+                <!-- Ricorrenza del trasferimento -->
+                <div class="form-group" id="transferRecurringGroup">
+                    <label class="checkbox-row" id="transferRecurringToggleRow">
+                        <input type="checkbox" id="transferIsRecurring" onchange="toggleTransferRecurringOptions()">
+                        <span>🔁 Ripeti</span>
+                    </label>
+                    <div class="recurring-options" id="transferRecurringOptions">
+                        <div>
+                            <label for="transferFrequency">Frequenza</label>
+                            <select id="transferFrequency">
+                                <option value="weekly">Ogni settimana</option>
+                                <option value="monthly" selected>Ogni mese</option>
+                                <option value="yearly">Ogni anno</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="transferEndDate">Fino al (opzionale)</label>
+                            <input type="date" id="transferEndDate">
+                        </div>
+                    </div>
                 </div>
 
                 <div class="form-group">
@@ -1407,6 +1464,7 @@
         let editingTransactionId = null;
         let editingRecurringId = null;
         let editingTransferIds = null;   // [idUscita, idEntrata]
+        let editingRecurringTransferId = null; // modifica di un trasferimento ricorrente
         let formOriginalCategoryId = null;
 
         const FREQUENCY_LABELS = {
@@ -2025,6 +2083,32 @@
             openModal('transactionModal');
         }
 
+        // Nuova entrata/uscita ricorrente dalla scheda Ricorrenti
+        function openNewRecurringModal(type) {
+            const firstCategory = visibleCategories(type)[0];
+            if (!firstCategory) {
+                alert('Crea prima almeno una categoria di questo tipo.');
+                return;
+            }
+
+            resetTransactionForm();
+            document.getElementById('transactionType').value = type;
+            document.getElementById('transactionCategory').value = firstCategory.id;
+            formOriginalCategoryId = firstCategory.id;
+            document.getElementById('modalTitle').textContent =
+                type === 'income' ? 'Nuova Entrata Ricorrente' : 'Nuova Uscita Ricorrente';
+
+            fillCategorySelect(type, firstCategory.id);
+            selectAccountInForm(getDefaultAccount());
+
+            document.getElementById('isRecurring').checked = true;
+            document.getElementById('recurringToggleRow').style.display = 'none';
+            toggleRecurringOptions();
+            document.getElementById('transactionSubmitBtn').textContent = 'Crea ricorrenza';
+
+            openModal('transactionModal');
+        }
+
         function openEditTransactionModal(id) {
             const transaction = findById(transactions, id);
             if (!transaction) return;
@@ -2059,6 +2143,11 @@
         function openEditRecurringModal(id) {
             const rule = findById(recurring, id);
             if (!rule) return;
+
+            if (rule.kind === 'transfer') {
+                openEditRecurringTransferModal(rule);
+                return;
+            }
 
             resetTransactionForm();
             editingRecurringId = rule.id;
@@ -2222,17 +2311,27 @@
                 if (rule.paused) return;
 
                 let guard = 0; // sicurezza contro cicli infiniti con dati corrotti
+                if (rule.kind === 'transfer' &&
+                    (!findById(accounts, rule.fromAccountId) || !findById(accounts, rule.toAccountId))) {
+                    return; // un conto non esiste più
+                }
+
                 while (rule.nextDate && rule.nextDate <= today && !isRuleFinished(rule) && guard < 1000) {
-                    transactions.push({
-                        id: generateId(),
-                        type: rule.type,
-                        categoryId: rule.categoryId,
-                        amount: rule.amount,
-                        accountId: rule.accountId,
-                        date: rule.nextDate,
-                        notes: rule.notes || '',
-                        recurringId: rule.id
-                    });
+                    if (rule.kind === 'transfer') {
+                        // I trasferimenti automatici non vengono bloccati se il saldo è insufficiente
+                        createTransferPair(rule.fromAccountId, rule.toAccountId, rule.amount, rule.nextDate, rule.notes || '', { recurringId: rule.id });
+                    } else {
+                        transactions.push({
+                            id: generateId(),
+                            type: rule.type,
+                            categoryId: rule.categoryId,
+                            amount: rule.amount,
+                            accountId: rule.accountId,
+                            date: rule.nextDate,
+                            notes: rule.notes || '',
+                            recurringId: rule.id
+                        });
+                    }
                     rule.nextDate = nextOccurrence(rule.nextDate, rule.frequency, rule.anchorDay);
                     created++;
                     guard++;
@@ -2279,7 +2378,7 @@
                 container.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">🔁</div>
-                        <p>Nessuna ricorrenza.<br>Registra un'entrata o un'uscita e attiva "Ripeti" (es. affitto, stipendio, abbonamenti).</p>
+                        <p>Nessuna ricorrenza.<br>Usa i pulsanti qui sopra (es. affitto, stipendio, abbonamenti, trasferimento mensile sul conto risparmi).</p>
                     </div>`;
                 return;
             }
@@ -2289,8 +2388,11 @@
             const sorted = [...recurring].sort((a, b) => rank(a) - rank(b) || String(a.nextDate).localeCompare(String(b.nextDate)));
 
             container.innerHTML = sorted.map(rule => {
+                const isTransfer = rule.kind === 'transfer';
                 const category = findById(categories, rule.categoryId);
                 const account = findById(accounts, rule.accountId);
+                const fromAccount = findById(accounts, rule.fromAccountId);
+                const toAccount = findById(accounts, rule.toAccountId);
                 const finished = isRuleFinished(rule);
 
                 let status = `Prossima: ${formatDate(rule.nextDate)}`;
@@ -2299,19 +2401,26 @@
 
                 const details = [
                     FREQUENCY_LABELS[rule.frequency] || rule.frequency,
-                    account ? escapeHtml(account.name) : 'Conto eliminato',
+                    isTransfer ? 'Trasferimento' : (account ? escapeHtml(account.name) : 'Conto eliminato'),
                     status,
                     rule.endDate && !finished ? `fino al ${formatDate(rule.endDate)}` : '',
                     rule.notes ? escapeHtml(rule.notes) : ''
                 ].filter(Boolean).join(' • ');
 
+                const title = isTransfer
+                    ? `↔️ ${escapeHtml(fromAccount ? fromAccount.name : '?')} → ${escapeHtml(toAccount ? toAccount.name : '?')}`
+                    : `${category ? escapeHtml(category.icon) : '💰'} ${category ? escapeHtml(category.name) : 'Altro'}`;
+                const amountHtml = isTransfer
+                    ? formatCurrency(rule.amount)
+                    : `${rule.type === 'income' ? '+' : '-'}${formatCurrency(rule.amount)}`;
+
                 return `
                     <div class="recurring-card ${rule.paused || finished ? 'paused' : ''}">
                         <div>
                             <div class="recurring-title">
-                                ${category ? escapeHtml(category.icon) : '💰'} ${category ? escapeHtml(category.name) : 'Altro'}
-                                <span class="transaction-amount ${rule.type}" style="font-size: 16px; margin-left: 8px;">
-                                    ${rule.type === 'income' ? '+' : '-'}${formatCurrency(rule.amount)}
+                                ${title}
+                                <span class="transaction-amount ${isTransfer ? 'transfer' : rule.type}" style="font-size: 16px; margin-left: 8px;">
+                                    ${amountHtml}
                                 </span>
                             </div>
                             <div class="recurring-details">${details}</div>
@@ -2356,7 +2465,8 @@
 
             const account = findById(accounts, id);
             const linkedTransactions = transactions.filter(t => sameId(t.accountId, id)).length;
-            const linkedRules = recurring.filter(r => sameId(r.accountId, id)).length;
+            const usesAccount = r => sameId(r.accountId, id) || sameId(r.fromAccountId, id) || sameId(r.toAccountId, id);
+            const linkedRules = recurring.filter(usesAccount).length;
 
             let message = `Sei sicuro di voler eliminare il conto "${account ? account.name : ''}"?`;
             if (linkedTransactions > 0 || linkedRules > 0) {
@@ -2367,7 +2477,7 @@
 
             accounts = accounts.filter(a => !sameId(a.id, id));
             transactions = transactions.filter(t => !sameId(t.accountId, id));
-            recurring = recurring.filter(r => !sameId(r.accountId, id));
+            recurring = recurring.filter(r => !usesAccount(r));
 
             // Se era il conto predefinito, il primo rimasto diventa predefinito
             if (!accounts.some(a => a.isDefault) && accounts.length > 0) {
@@ -2415,14 +2525,41 @@
             document.getElementById('toAccount').innerHTML = '<option value="">Seleziona conto di destinazione</option>' + accountOptions;
         }
 
-        function openTransferModal() {
+        function setTransferRecurringUI({ checked, lockToggle, showGroup }) {
+            document.getElementById('transferRecurringGroup').style.display = showGroup ? '' : 'none';
+            document.getElementById('transferRecurringToggleRow').style.display = lockToggle ? 'none' : '';
+            document.getElementById('transferIsRecurring').checked = checked;
+            toggleTransferRecurringOptions();
+        }
+
+        function toggleTransferRecurringOptions() {
+            const isOn = document.getElementById('transferIsRecurring').checked;
+            document.getElementById('transferRecurringOptions').classList.toggle('visible', isOn);
+
+            let label = 'Data';
+            if (editingRecurringTransferId !== null) label = 'Prossima data';
+            else if (isOn) label = 'Prima data';
+            document.getElementById('transferDateLabel').textContent = label;
+
+            // Il testo del pulsante dipende dalla modalità (solo per un nuovo trasferimento)
+            if (editingTransferIds === null && editingRecurringTransferId === null) {
+                document.getElementById('transferSubmitBtn').textContent = isOn ? 'Crea ricorrenza' : 'Trasferisci';
+            }
+        }
+
+        // recurringMode = true quando si apre da "Trasferimento ricorrente"
+        function openTransferModal(recurringMode = false) {
             editingTransferIds = null;
+            editingRecurringTransferId = null;
             document.getElementById('transferForm').reset();
             document.getElementById('transferDate').value = todayISO();
-            document.getElementById('transferModalTitle').textContent = 'Trasferisci Denaro';
-            document.getElementById('transferSubmitBtn').textContent = 'Trasferisci';
+            document.getElementById('transferFrequency').value = 'monthly';
+            document.getElementById('transferEndDate').value = '';
+            document.getElementById('transferModalTitle').textContent =
+                recurringMode ? 'Trasferimento Ricorrente' : 'Trasferisci Denaro';
 
             populateTransferSelects();
+            setTransferRecurringUI({ checked: recurringMode, lockToggle: recurringMode, showGroup: true });
             openModal('transferModal');
         }
 
@@ -2435,6 +2572,7 @@
 
             const toAccount = findById(accounts, pair.in.accountId);
 
+            editingRecurringTransferId = null;
             editingTransferIds = [pair.out.id, pair.in.id];
             document.getElementById('transferForm').reset();
             populateTransferSelects();
@@ -2447,7 +2585,59 @@
             document.getElementById('transferModalTitle').textContent = 'Modifica Trasferimento';
             document.getElementById('transferSubmitBtn').textContent = 'Salva modifiche';
 
+            // Si modifica solo questo trasferimento, non la ricorrenza
+            setTransferRecurringUI({ checked: false, lockToggle: true, showGroup: false });
             openModal('transferModal');
+        }
+
+        function openEditRecurringTransferModal(rule) {
+            editingTransferIds = null;
+            editingRecurringTransferId = rule.id;
+            document.getElementById('transferForm').reset();
+            populateTransferSelects();
+
+            document.getElementById('fromAccount').value = String(rule.fromAccountId);
+            document.getElementById('toAccount').value = String(rule.toAccountId);
+            document.getElementById('transferAmount').value = rule.amount;
+            document.getElementById('transferDate').value = rule.nextDate;
+            document.getElementById('transferNotes').value = rule.notes || '';
+            document.getElementById('transferFrequency').value = rule.frequency;
+            document.getElementById('transferEndDate').value = rule.endDate || '';
+            document.getElementById('transferModalTitle').textContent = 'Modifica Trasferimento Ricorrente';
+            document.getElementById('transferSubmitBtn').textContent = 'Salva ricorrenza';
+
+            setTransferRecurringUI({ checked: true, lockToggle: true, showGroup: true });
+            openModal('transferModal');
+        }
+
+        function buildTransferData(fromAccountId, toAccountId, amount, date, notes) {
+            const fromAccount = findById(accounts, fromAccountId);
+            const toAccount = findById(accounts, toAccountId);
+            const transferCategory = getTransferCategory();
+            const common = { categoryId: transferCategory.id, amount, date, transferNotes: notes, isTransfer: true };
+
+            return {
+                outData: {
+                    ...common,
+                    type: 'expense',
+                    accountId: fromAccountId,
+                    notes: `Trasferimento a ${toAccount ? toAccount.name : ''}${notes ? ' - ' + notes : ''}`
+                },
+                inData: {
+                    ...common,
+                    type: 'income',
+                    accountId: toAccountId,
+                    notes: `Trasferimento da ${fromAccount ? fromAccount.name : ''}${notes ? ' - ' + notes : ''}`
+                }
+            };
+        }
+
+        // Crea la coppia uscita/entrata collegata dallo stesso transferId
+        function createTransferPair(fromAccountId, toAccountId, amount, date, notes, extra = {}) {
+            const { outData, inData } = buildTransferData(fromAccountId, toAccountId, amount, date, notes);
+            const transferId = generateId();
+            transactions.push({ id: generateId(), ...outData, ...extra, transferId });
+            transactions.push({ id: generateId(), ...inData, ...extra, transferId });
         }
 
         function executeTransfer(e) {
@@ -2455,12 +2645,16 @@
 
             const fromAccountId = idFromValue(accounts, document.getElementById('fromAccount').value);
             const toAccountId = idFromValue(accounts, document.getElementById('toAccount').value);
-            const amount = parseFloat(document.getElementById('transferAmount').value);
+            const amount = Math.round(parseFloat(document.getElementById('transferAmount').value) * 100) / 100;
             const date = document.getElementById('transferDate').value;
             const notes = document.getElementById('transferNotes').value.trim();
+            const isRecurringForm = editingRecurringTransferId !== null ||
+                (editingTransferIds === null && document.getElementById('transferIsRecurring').checked);
+            const frequency = document.getElementById('transferFrequency').value;
+            const endDate = document.getElementById('transferEndDate').value || null;
 
             if (fromAccountId === null || toAccountId === null) {
-                alert('Errore: conti non trovati!');
+                alert('Seleziona il conto di origine e quello di destinazione!');
                 return;
             }
 
@@ -2474,54 +2668,64 @@
                 return;
             }
 
-            const fromAccount = findById(accounts, fromAccountId);
-            const toAccount = findById(accounts, toAccountId);
-            const oldOut = editingTransferIds ? findById(transactions, editingTransferIds[0]) : null;
-            const oldIn = editingTransferIds ? findById(transactions, editingTransferIds[1]) : null;
-
-            // Verifica saldo sufficiente (in modifica, senza contare il trasferimento stesso)
-            let available = getAccountBalance(fromAccountId);
-            if (oldOut && sameId(oldOut.accountId, fromAccountId)) available += oldOut.amount;
-            if (oldIn && sameId(oldIn.accountId, fromAccountId)) available -= oldIn.amount;
-
-            if (available < amount - 0.001) {
-                alert(`Saldo insufficiente! Disponibile: ${formatCurrency(available)}`);
+            if (!date) {
+                alert('Inserisci una data!');
                 return;
             }
 
-            const transferCategory = getTransferCategory();
-            const outData = {
-                type: 'expense',
-                categoryId: transferCategory.id,
-                amount,
-                accountId: fromAccountId,
-                date,
-                notes: `Trasferimento a ${toAccount.name}${notes ? ' - ' + notes : ''}`,
-                transferNotes: notes,
-                isTransfer: true
-            };
-            const inData = {
-                type: 'income',
-                categoryId: transferCategory.id,
-                amount,
-                accountId: toAccountId,
-                date,
-                notes: `Trasferimento da ${fromAccount.name}${notes ? ' - ' + notes : ''}`,
-                transferNotes: notes,
-                isTransfer: true
-            };
+            if (isRecurringForm) {
+                if (endDate && endDate < date) {
+                    alert('La data di fine deve essere successiva alla data della ricorrenza!');
+                    return;
+                }
 
-            if (oldOut && oldIn) {
-                const transferId = oldOut.transferId ?? generateId();
-                Object.assign(oldOut, outData, { transferId });
-                Object.assign(oldIn, inData, { transferId });
+                const ruleData = {
+                    fromAccountId, toAccountId, amount, notes, frequency, endDate,
+                    nextDate: date,
+                    anchorDay: parseDate(date).getDate()
+                };
+
+                if (editingRecurringTransferId !== null) {
+                    const rule = findById(recurring, editingRecurringTransferId);
+                    if (rule) Object.assign(rule, ruleData);
+                } else {
+                    recurring.push({
+                        id: generateId(),
+                        kind: 'transfer',
+                        type: 'transfer',
+                        startDate: date,
+                        paused: false,
+                        ...ruleData
+                    });
+                }
+
+                processRecurring();
             } else {
-                const transferId = generateId();
-                transactions.push({ id: generateId(), ...outData, transferId });
-                transactions.push({ id: generateId(), ...inData, transferId });
+                const oldOut = editingTransferIds ? findById(transactions, editingTransferIds[0]) : null;
+                const oldIn = editingTransferIds ? findById(transactions, editingTransferIds[1]) : null;
+
+                // Verifica saldo sufficiente (in modifica, senza contare il trasferimento stesso)
+                let available = getAccountBalance(fromAccountId);
+                if (oldOut && sameId(oldOut.accountId, fromAccountId)) available += oldOut.amount;
+                if (oldIn && sameId(oldIn.accountId, fromAccountId)) available -= oldIn.amount;
+
+                if (available < amount - 0.001) {
+                    alert(`Saldo insufficiente! Disponibile: ${formatCurrency(available)}`);
+                    return;
+                }
+
+                if (oldOut && oldIn) {
+                    const { outData, inData } = buildTransferData(fromAccountId, toAccountId, amount, date, notes);
+                    const transferId = oldOut.transferId ?? generateId();
+                    Object.assign(oldOut, outData, { transferId });
+                    Object.assign(oldIn, inData, { transferId });
+                } else {
+                    createTransferPair(fromAccountId, toAccountId, amount, date, notes);
+                }
             }
 
             editingTransferIds = null;
+            editingRecurringTransferId = null;
             saveData();
             closeModal('transferModal');
             updateAll();
@@ -2821,7 +3025,9 @@
                 return;
             }
 
-            const sorted = monthTrans.sort((a, b) => parseDate(b.date) - parseDate(a.date));
+            // Un trasferimento è una sola riga: si mostra l'uscita e si nasconde l'entrata collegata
+            const visible = monthTrans.filter(t => !(t.isTransfer && t.type === 'income' && getTransferPair(t).out));
+            const sorted = visible.sort((a, b) => parseDate(b.date) - parseDate(a.date));
             container.innerHTML = sorted.map(renderTransaction).join('');
         }
 
@@ -2890,7 +3096,44 @@
         }
 
         // ===== HELPER FUNCTIONS =====
+        function renderTransferRow(transaction, pair, recurringBadge) {
+            const fromAccount = findById(accounts, pair.out.accountId);
+            const toAccount = findById(accounts, pair.in.accountId);
+            const userNotes = getTransferUserNotes(pair.out, toAccount);
+
+            return `
+                <div class="transaction-item">
+                    <div class="transaction-info">
+                        <div class="transaction-category">↔️ Trasferimento${recurringBadge}</div>
+                        <div class="transaction-details">
+                            ${formatDate(pair.out.date)} • ${escapeHtml(fromAccount ? fromAccount.name : 'Sconosciuto')} → ${escapeHtml(toAccount ? toAccount.name : 'Sconosciuto')}
+                            ${userNotes ? ` • ${escapeHtml(userNotes)}` : ''}
+                        </div>
+                    </div>
+                    <div class="transaction-actions">
+                        <div class="transaction-amount transfer">${formatCurrency(pair.out.amount)}</div>
+                        <button class="btn-icon" onclick="openEditTransactionModal(${jsArg(transaction.id)})" title="Modifica trasferimento">
+                            ✎
+                        </button>
+                        <button class="btn-icon btn-danger" onclick="deleteTransaction(${jsArg(transaction.id)})" title="Elimina trasferimento">
+                            ×
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
         function renderTransaction(transaction) {
+            if (transaction.isTransfer) {
+                const pair = getTransferPair(transaction);
+                if (pair.out && pair.in) {
+                    const badge = transaction.recurringId !== undefined && transaction.recurringId !== null
+                        ? '<span class="badge" title="Generato da una ricorrenza">🔁 ricorrente</span>'
+                        : '';
+                    return renderTransferRow(transaction, pair, badge);
+                }
+            }
+
             const category = findById(categories, transaction.categoryId);
             const account = findById(accounts, transaction.accountId);
             const icon = transaction.isTransfer ? '↔️' : (category ? category.icon : '💰');
